@@ -118,6 +118,22 @@ class GenerateArguments:
             )
         }
     )
+    input: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Input file for generation, a TSV file structured similar to the training data."
+            )
+        }
+    )
+    output: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "File to save the predictions to."
+            )
+        }
+    )
     max_length: Optional[int] = field(
         default=None,
         metadata={

@@ -87,6 +87,8 @@ def get_inference_dataloader(
     tsv_path: str = "",
     modality: ModalityType = "pose2text",
     batch_size: int = 1,
+    label_pad_token_id: int =-100,
+    pad_to_multiple_of: Optional[int] = None,
 ) -> DataLoader:
     """
     Build an inference DataLoader for the requested modality, given a TSV metadata file.
@@ -102,6 +104,10 @@ def get_inference_dataloader(
         Which dataset class to use (determines how rows are parsed/preprocessed).
     batch_size : int
         Batch size for inference (generation is typically memory-bound; start small).
+    label_pad_token_id : int
+        Token ID used to pad label sequences.
+    pad_to_multiple_of : int
+        Pads to a multiple of this number, if set.
 
     Returns
     -------
@@ -129,7 +135,10 @@ def get_inference_dataloader(
         dataset = dataset_class(test_metadata_file=tsv_path, cache_dir=tmp_dir)
         dataset.download_and_prepare()
         dataset = dataset.as_dataset()["test"]
-        data_collator = DataCollatorMultimodalSeq2Seq(processor)
+
+        data_collator = DataCollatorMultimodalSeq2Seq(processor=processor,
+                                                      label_pad_token_id=label_pad_token_id,
+                                                      pad_to_multiple_of=pad_to_multiple_of)
 
         return DataLoader(
             dataset,
@@ -203,12 +212,16 @@ def logits_to_text(
 
     # Replace ignore index with PAD for clean decoding
     generated_tokens = np.where(generated_tokens != -100, generated_tokens, pad_id)
-    decoded_generated_tokens = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
+    decoded_generated_tokens = tokenizer.batch_decode(generated_tokens,
+                                                      skip_special_tokens=True,
+                                                      clean_up_tokenization_spaces=True)
 
     if labels is not None:
         labels = _to_numpy(labels)
         labels = np.where(labels != -100, labels, pad_id)
-        decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+        decoded_labels = tokenizer.batch_decode(labels,
+                                                skip_special_tokens=True,
+                                                clean_up_tokenization_spaces=True)
         return decoded_generated_tokens, decoded_labels
 
     return decoded_generated_tokens, None
@@ -487,6 +500,9 @@ def batched_inference(
     tsv_path: str,
     modality: ModalityType,
     batch_size: int = 1,
+    label_pad_token_id: int = -100,
+    pad_to_multiple_of: Optional[int] = None,
+    gen_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, List[Any]]:
     """
     End-to-end convenience function:
@@ -509,6 +525,12 @@ def batched_inference(
         Modality key selecting the dataset class.
     batch_size : int
         Inference batch size.
+    label_pad_token_id : int
+        Token ID used to pad label sequences.
+    pad_to_multiple_of : int
+        Pads to a multiple of this number, if set.
+    gen_kwargs : dict | None
+        Additional keyword args for `model.generate` that override `generation_config`.
 
     Returns
     -------
@@ -524,6 +546,8 @@ def batched_inference(
         tsv_path=tsv_path,
         modality=modality,
         batch_size=batch_size,
+        pad_to_multiple_of=pad_to_multiple_of,
+        label_pad_token_id=label_pad_token_id
     )
 
     predicted_samples: List[str] = []
@@ -540,6 +564,7 @@ def batched_inference(
                 tokenizer=processor.tokenizer,
                 inputs=batch,
                 return_perplexity=True,  # flip to False if you don't need perplexities
+                gen_kwargs=gen_kwargs
             )
 
         # Decode to text. Accepts torch tensors directly.

@@ -6,3 +6,4 @@ named translation.py within this package.
 
 from .translation.translation_training import main as translation_training_main
 from .translation.translation_generate import main as translation_generate_main
+from .translation.translate import main as translate_main
