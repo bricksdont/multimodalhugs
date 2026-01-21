@@ -78,6 +78,8 @@ from multimodalhugs.tasks.translation.utils import (
     ensure_train_output_dir,
     resolve_missing_arg,
     resolve_checkpoint_path_from_general_setup_path,
+    set_up_logging,
+    assemble_generation_args
 )
 
 logger = logging.getLogger(__name__)

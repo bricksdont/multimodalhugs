@@ -1,15 +1,27 @@
 import os
 import re
+import sys
 import yaml
 import logging
 import dataclasses
+import transformers
+import datasets
 
 from dataclasses import asdict, fields, is_dataclass
 
 from pathlib import Path
-from typing import List, TypeVar
+from typing import List, TypeVar, Tuple
 from omegaconf import OmegaConf
 from transformers import HfArgumentParser
+
+from multimodalhugs.tasks.translation.config_classes import (
+    ModelArguments,
+    ProcessorArguments,
+    DataTrainingArguments,
+    ExtraArguments,
+    ExtendedSeq2SeqTrainingArguments,
+    GenerateArguments,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -150,6 +162,87 @@ def merge_config_and_command_args(config_path, class_type, section, _args, remai
         command_arg_names=command_arg_names,
         yaml_arg_keys=yaml_keys,
     )
+
+
+ArgumentsTuple = Tuple[(GenerateArguments, ExtraArguments, ModelArguments, ProcessorArguments, DataTrainingArguments, ExtendedSeq2SeqTrainingArguments)]
+
+
+def assemble_generation_args(resolve_dataset_dir: bool = False) -> (GenerateArguments,
+                                                                    ExtraArguments,
+                                                                    ModelArguments,
+                                                                    ProcessorArguments,
+                                                                    DataTrainingArguments,
+                                                                    ExtendedSeq2SeqTrainingArguments):
+    parser = HfArgumentParser(
+        (GenerateArguments, ExtraArguments, ModelArguments, ProcessorArguments, DataTrainingArguments,
+         ExtendedSeq2SeqTrainingArguments)
+    )
+    generate_args, extra_args, model_args, processor_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    if extra_args.config_path:
+        for section in ("training",):
+            try:
+                training_args = merge_config_and_command_args(
+                    extra_args.config_path,
+                    ExtendedSeq2SeqTrainingArguments,
+                    section,
+                    training_args,
+                    sys.argv[1:],
+                )
+                break
+            except KeyError:
+                continue
+        generate_args = merge_config_and_command_args(extra_args.config_path, GenerateArguments, "generation",
+                                                      generate_args, sys.argv[1:])
+        model_args = merge_config_and_command_args(extra_args.config_path, ModelArguments, "model", model_args,
+                                                   sys.argv[1:])
+        processor_args = merge_config_and_command_args(extra_args.config_path, ProcessorArguments, "processor",
+                                                       processor_args, sys.argv[1:])
+        data_args = merge_config_and_command_args(extra_args.config_path, DataTrainingArguments, "data", data_args,
+                                                  sys.argv[1:])
+
+    # Ensure we don't drop columns needed by multimodal processors/collators
+    setattr(training_args, "remove_unused_columns", False)
+    setattr(training_args, "report_to", [])
+
+    # Resolve paths if omitted
+    if model_args.model_name_or_path is None:
+        resolve_missing_arg(
+            model_args,
+            "model_name_or_path",
+            training_args.output_dir,
+            extra_args.setup_path if hasattr(extra_args, "setup_path") else None,
+        )
+        model_args.model_name_or_path = resolve_checkpoint_path_from_general_setup_path(model_args.model_name_or_path)
+
+    resolve_missing_arg(
+        processor_args,
+        "processor_name_or_path",
+        training_args.output_dir,
+        extra_args.setup_path if hasattr(extra_args, "setup_path") else None,
+    )
+
+    if resolve_dataset_dir:
+        resolve_missing_arg(data_args, 'dataset_dir', training_args.output_dir,
+                            extra_args.setup_path if hasattr(extra_args, 'setup_path') else None)
+
+    return generate_args, extra_args, model_args, processor_args, data_args, training_args
+
+
+def set_up_logging(log_level):
+
+    # --- Logging ---
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    logger.setLevel(log_level)
+    datasets.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.set_verbosity(log_level)
+    transformers.utils.logging.enable_default_handler()
+    transformers.utils.logging.enable_explicit_format()
+
 
 def check_t5_fp16_compatibility(model, fp16: bool):
     """

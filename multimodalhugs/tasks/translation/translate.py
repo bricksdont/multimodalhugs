@@ -16,7 +16,6 @@ from transformers import (
     AutoConfig,
     AutoModelForSeq2SeqLM,
     AutoProcessor,
-    HfArgumentParser,
     set_seed,
     GenerationConfig,
 )
@@ -28,6 +27,7 @@ from multimodalhugs.processors import (
     Features2TextTranslationProcessor,
 )
 
+# noinspection PyUnresolvedReferences
 import multimodalhugs.models
 
 Pose2TextTranslationProcessor.register_for_auto_class()
@@ -46,34 +46,21 @@ Text2TextTranslationProcessor.register_for_auto_class()
 AutoProcessor.register("text2text_translation_processor", Text2TextTranslationProcessor)
 
 import logging
-import sys
 import json
 import torch
-import datasets
-import transformers
 
 from pathlib import Path
 from typing import Union
 from transformers.utils import send_example_telemetry
 
 from multimodalhugs.utils import print_module_details
-
-from multimodalhugs.tasks.translation.config_classes import (
-    ModelArguments,
-    ProcessorArguments,
-    DataTrainingArguments,
-    ExtraArguments,
-    ExtendedSeq2SeqTrainingArguments,
-    GenerateArguments,
-)
-
 from multimodalhugs.tasks.translation.inference_utils import batched_inference, ModalityType
+from multimodalhugs.tasks.translation.config_classes import GenerateArguments
 
 from multimodalhugs.tasks.translation.utils import (
     construct_kwargs,
-    merge_config_and_command_args,
-    resolve_missing_arg,
-    resolve_checkpoint_path_from_general_setup_path,
+    set_up_logging,
+    assemble_generation_args
 )
 
 logger = logging.getLogger(__name__)
@@ -90,7 +77,7 @@ def save_dict_to_json(data: dict, path: Union[str,Path], indent: int = 2) -> Non
         json.dump(data, f, indent=indent, ensure_ascii=False)
 
 
-def _infer_generation_kwargs(generate_args, generation_config):
+def _infer_generation_kwargs(generate_args: GenerateArguments, generation_config: GenerationConfig):
     """
     Keep behavior similar to translation_generate.py:
     - If generate_args.max_length is set, treat it as "how many new tokens to generate".
@@ -112,66 +99,13 @@ def _infer_generation_kwargs(generate_args, generation_config):
 
 
 def main():
-    # --- Argument parsing (CLI + optional YAML merge) ---
-    parser = HfArgumentParser(
-        (GenerateArguments, ExtraArguments, ModelArguments, ProcessorArguments, DataTrainingArguments, ExtendedSeq2SeqTrainingArguments)
-    )
-    generate_args, extra_args, model_args, processor_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if extra_args.config_path:
-        for section in ("training",):
-            try:
-                training_args = merge_config_and_command_args(
-                    extra_args.config_path,
-                    ExtendedSeq2SeqTrainingArguments,
-                    section,
-                    training_args,
-                    sys.argv[1:],
-                )
-                break
-            except KeyError:
-                continue
-        generate_args = merge_config_and_command_args(extra_args.config_path, GenerateArguments, "generation", generate_args, sys.argv[1:])
-        model_args = merge_config_and_command_args(extra_args.config_path, ModelArguments, "model", model_args, sys.argv[1:])
-        processor_args = merge_config_and_command_args(extra_args.config_path, ProcessorArguments, "processor", processor_args, sys.argv[1:])
-        data_args = merge_config_and_command_args(extra_args.config_path, DataTrainingArguments, "data", data_args, sys.argv[1:])
+    generate_args, extra_args, model_args, processor_args, data_args, training_args = assemble_generation_args()
 
-    # Ensure we don't drop columns needed by multimodal processors/collators
-    setattr(training_args, "remove_unused_columns", False)
-    setattr(training_args, "report_to", [])
-
-    # Resolve paths if omitted
-    if model_args.model_name_or_path is None:
-        resolve_missing_arg(
-            model_args,
-            "model_name_or_path",
-            training_args.output_dir,
-            extra_args.setup_path if hasattr(extra_args, "setup_path") else None,
-        )
-        model_args.model_name_or_path = resolve_checkpoint_path_from_general_setup_path(model_args.model_name_or_path)
-
-    resolve_missing_arg(
-        processor_args,
-        "processor_name_or_path",
-        training_args.output_dir,
-        extra_args.setup_path if hasattr(extra_args, "setup_path") else None,
-    )
+    set_up_logging(log_level=training_args.get_process_log_level())
 
     # Telemetry (optional)
     send_example_telemetry("run_translate_only", model_args, data_args)
-
-    # --- Logging ---
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-    log_level = training_args.get_process_log_level()
-    logger.setLevel(log_level)
-    datasets.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.enable_default_handler()
-    transformers.utils.logging.enable_explicit_format()
 
     # argument handling
 
