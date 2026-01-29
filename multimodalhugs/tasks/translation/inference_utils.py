@@ -503,6 +503,7 @@ def batched_inference(
     label_pad_token_id: int = -100,
     pad_to_multiple_of: Optional[int] = None,
     gen_kwargs: Optional[Dict[str, Any]] = None,
+    generation_config: Optional[Union[GenerationConfig, Dict[str, Any]]] = None,
 ) -> Dict[str, List[Any]]:
     """
     End-to-end convenience function:
@@ -531,6 +532,8 @@ def batched_inference(
         Pads to a multiple of this number, if set.
     gen_kwargs : dict | None
         Additional keyword args for `model.generate` that override `generation_config`.
+    generation_config : GenerationConfig | dict | None
+        Default generation parameters. A dict is fine; we `to_dict()` if needed.
 
     Returns
     -------
@@ -564,7 +567,8 @@ def batched_inference(
                 tokenizer=processor.tokenizer,
                 inputs=batch,
                 return_perplexity=True,  # flip to False if you don't need perplexities
-                gen_kwargs=gen_kwargs
+                gen_kwargs=gen_kwargs,
+                generation_config=generation_config
             )
 
         # Decode to text. Accepts torch tensors directly.

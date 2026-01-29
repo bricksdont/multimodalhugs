@@ -12,7 +12,7 @@ from dataclasses import asdict, fields, is_dataclass
 from pathlib import Path
 from typing import List, TypeVar, Tuple
 from omegaconf import OmegaConf
-from transformers import HfArgumentParser
+from transformers import HfArgumentParser, AutoProcessor
 
 from multimodalhugs.tasks.translation.config_classes import (
     ModelArguments,
@@ -21,6 +21,14 @@ from multimodalhugs.tasks.translation.config_classes import (
     ExtraArguments,
     ExtendedSeq2SeqTrainingArguments,
     GenerateArguments,
+)
+
+from multimodalhugs.processors import (
+    SignwritingProcessor,
+    Pose2TextTranslationProcessor,
+    Image2TextTranslationProcessor,
+    Text2TextTranslationProcessor,
+    Features2TextTranslationProcessor,
 )
 
 # Configure logging
@@ -242,6 +250,24 @@ def set_up_logging(log_level):
     transformers.utils.logging.set_verbosity(log_level)
     transformers.utils.logging.enable_default_handler()
     transformers.utils.logging.enable_explicit_format()
+
+
+def register_processor_autoclasses():
+
+    Pose2TextTranslationProcessor.register_for_auto_class()
+    AutoProcessor.register("pose2text_translation_processor", Pose2TextTranslationProcessor)
+
+    Features2TextTranslationProcessor.register_for_auto_class()
+    AutoProcessor.register("features2text_translation_processor", Features2TextTranslationProcessor)
+
+    SignwritingProcessor.register_for_auto_class()
+    AutoProcessor.register("signwritting_processor", SignwritingProcessor)
+
+    Image2TextTranslationProcessor.register_for_auto_class()
+    AutoProcessor.register("image2text_translation_processor", Image2TextTranslationProcessor)
+
+    Text2TextTranslationProcessor.register_for_auto_class()
+    AutoProcessor.register("text2text_translation_processor", Text2TextTranslationProcessor)
 
 
 def check_t5_fp16_compatibility(model, fp16: bool):

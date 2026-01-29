@@ -24,32 +24,11 @@ from transformers import (
     set_seed,
     GenerationConfig,
 )
-from multimodalhugs.processors import (
-    SignwritingProcessor,
-    Pose2TextTranslationProcessor,
-    Image2TextTranslationProcessor,
-    Text2TextTranslationProcessor,
-    Features2TextTranslationProcessor
-)
 
+# noinspection PyUnresolvedReferences
 import multimodalhugs.models
+
 from multimodalhugs import MultiLingualSeq2SeqTrainer
-
-Pose2TextTranslationProcessor.register_for_auto_class()
-AutoProcessor.register("pose2text_translation_processor", Pose2TextTranslationProcessor)
-
-Features2TextTranslationProcessor.register_for_auto_class()
-AutoProcessor.register("features2text_translation_processor", Features2TextTranslationProcessor)
-
-SignwritingProcessor.register_for_auto_class()
-AutoProcessor.register("signwritting_processor", SignwritingProcessor)
-
-Image2TextTranslationProcessor.register_for_auto_class()
-AutoProcessor.register("image2text_translation_processor", Image2TextTranslationProcessor)
-
-Text2TextTranslationProcessor.register_for_auto_class()
-AutoProcessor.register("text2text_translation_processor", Text2TextTranslationProcessor)
-
 
 import logging
 import os
@@ -62,7 +41,6 @@ import numpy as np
 from datasets import load_from_disk
 
 import transformers
-from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import send_example_telemetry
 
 from multimodalhugs.data import DataCollatorMultimodalSeq2Seq
@@ -71,16 +49,14 @@ from multimodalhugs.utils import print_module_details
 from multimodalhugs.tasks.translation.config_classes import ModelArguments, ProcessorArguments, DataTrainingArguments, ExtraArguments, ExtendedSeq2SeqTrainingArguments, GenerateArguments
 
 from multimodalhugs.tasks.translation.utils import (
-    merge_arguments,
     construct_kwargs,
-    filter_config_keys,
     merge_config_and_command_args,
-    ensure_train_output_dir,
     resolve_missing_arg,
     resolve_checkpoint_path_from_general_setup_path,
-    set_up_logging,
-    assemble_generation_args
+    register_processor_autoclasses
 )
+
+register_processor_autoclasses()
 
 logger = logging.getLogger(__name__)
 
