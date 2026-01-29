@@ -85,7 +85,9 @@ TranslationOutput = Dict[str, List[Any]]
 class Translator:
 
     """
-    If components such as model, config and processor are not provided, they will be initialized from scratch.
+    Class that generates predictions using a provided model and processor.
+
+    If components such as model, config and processor are not provided as objects, they will be initialized from scratch.
     Specifically,
     - if a model is provided, then the arguments config_name or model_name_or_path will be ignored.
     - if model is None, then config_name or model_name_or_path must be provided.
@@ -280,8 +282,6 @@ def main():
                             fp16=training_args.fp16,
                             ignore_pad_token_for_loss=data_args.ignore_pad_token_for_loss,
                             device=device)
-
-    # --- Generate ---
 
     result = translator.translate_tsv(tsv_path=generate_args.input)
 
