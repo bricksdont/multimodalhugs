@@ -211,7 +211,9 @@ def assemble_generation_args(resolve_dataset_dir: bool = False) -> (GenerateArgu
 
     # Ensure we don't drop columns needed by multimodal processors/collators
     setattr(training_args, "remove_unused_columns", False)
+    setattr(training_args, "do_predict", True)
     setattr(training_args, "report_to", [])
+    setattr(training_args, "visualize_prediction_prob", 0)
 
     # Resolve paths if omitted
     if model_args.model_name_or_path is None:
@@ -237,7 +239,7 @@ def assemble_generation_args(resolve_dataset_dir: bool = False) -> (GenerateArgu
     return generate_args, extra_args, model_args, processor_args, data_args, training_args
 
 
-def set_up_logging(log_level):
+def set_up_logging(log_level, should_log: bool):
 
     # --- Logging ---
     logging.basicConfig(
@@ -245,6 +247,8 @@ def set_up_logging(log_level):
         datefmt="%m/%d/%Y %H:%M:%S",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+    if should_log:
+        transformers.utils.logging.set_verbosity_info()
     logger.setLevel(log_level)
     datasets.utils.logging.set_verbosity(log_level)
     transformers.utils.logging.set_verbosity(log_level)

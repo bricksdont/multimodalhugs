@@ -239,7 +239,8 @@ def main():
 
     generate_args, extra_args, model_args, processor_args, data_args, training_args = assemble_generation_args()
 
-    set_up_logging(log_level=training_args.get_process_log_level())
+    set_up_logging(log_level=training_args.get_process_log_level(),
+                   should_log=training_args.should_log)
 
     # Telemetry (optional)
     send_example_telemetry("run_translate_only", model_args, data_args)

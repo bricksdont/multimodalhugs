@@ -18,9 +18,7 @@ from transformers import (
     AutoConfig,
     AutoModelForSeq2SeqLM,
     AutoProcessor,
-    HfArgumentParser,
     DataCollatorForSeq2Seq,
-    Seq2SeqTrainingArguments,
     set_seed,
     GenerationConfig,
 )
@@ -32,28 +30,21 @@ from multimodalhugs import MultiLingualSeq2SeqTrainer
 
 import logging
 import os
-import sys
-import argparse
 
-import datasets
 import evaluate
 import numpy as np
 from datasets import load_from_disk
 
-import transformers
 from transformers.utils import send_example_telemetry
 
 from multimodalhugs.data import DataCollatorMultimodalSeq2Seq
 from multimodalhugs.utils import print_module_details
 
-from multimodalhugs.tasks.translation.config_classes import ModelArguments, ProcessorArguments, DataTrainingArguments, ExtraArguments, ExtendedSeq2SeqTrainingArguments, GenerateArguments
-
 from multimodalhugs.tasks.translation.utils import (
     construct_kwargs,
-    merge_config_and_command_args,
-    resolve_missing_arg,
-    resolve_checkpoint_path_from_general_setup_path,
-    register_processor_autoclasses
+    register_processor_autoclasses,
+    set_up_logging,
+    assemble_generation_args
 )
 
 register_processor_autoclasses()
@@ -95,71 +86,22 @@ def compute_metrics(eval_preds, tokenizer, metric):
 # Main function
 # -----------------------------
 def main():
-    # --- Reading YAML configuration file ---
-    # Allows passing the "--config_path" parameter to load arguments from a YAML.
-    # See all possible arguments in src/transformers/training_args.py
-    # or by passing the --help flag to this script.
-    # We now keep distinct sets of args, for a cleaner separation of concerns.
-    
-    parser = HfArgumentParser((GenerateArguments, ExtraArguments, ModelArguments, ProcessorArguments, DataTrainingArguments, ExtendedSeq2SeqTrainingArguments))
-    generate_args, extra_args, model_args, processor_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if extra_args.config_path:
-        for section in ("training",):
-            try:
-                training_args = merge_config_and_command_args(
-                    extra_args.config_path,
-                    ExtendedSeq2SeqTrainingArguments,
-                    section,
-                    training_args,
-                    sys.argv[1:]
-                )
-                break
-            except KeyError:
-                continue
-        generate_args = merge_config_and_command_args(extra_args.config_path, GenerateArguments, "generation", generate_args, sys.argv[1:])
-        model_args = merge_config_and_command_args(extra_args.config_path, ModelArguments, "model", model_args, sys.argv[1:])
-        processor_args = merge_config_and_command_args(extra_args.config_path, ProcessorArguments, "processor", processor_args, sys.argv[1:])
-        data_args = merge_config_and_command_args(extra_args.config_path, DataTrainingArguments, "data", data_args, sys.argv[1:])
-
-    # Disable removal of unused columns to ensure correct evaluation.
-    setattr(training_args, "remove_unused_columns", False)
-    setattr(training_args, "do_predict", True)
-    setattr(training_args, "report_to", [])
-    setattr(training_args, "visualize_prediction_prob", 0)
+    generate_args, extra_args, model_args, processor_args, data_args, training_args = assemble_generation_args()
 
     # Apply default manually if user did not provide it
     if generate_args.generate_output_dir is None:
         generate_args.generate_output_dir = os.getcwd()
         logger.warning(f"WARNING: No --generate_output_dir provided. "
-            f"Using current directory: {generate_args.generate_output_dir}")
+                       f"Using current directory: {generate_args.generate_output_dir}")
     else:
         logger.info(f"Outputs will be stored in: {generate_args.generate_output_dir}")
-
-    if model_args.model_name_or_path is None:
-        resolve_missing_arg(model_args, 'model_name_or_path', training_args.output_dir, extra_args.setup_path if hasattr(extra_args, 'setup_path') else None)
-        model_args.model_name_or_path = resolve_checkpoint_path_from_general_setup_path(model_args.model_name_or_path)
-
-    resolve_missing_arg(processor_args, 'processor_name_or_path', training_args.output_dir, extra_args.setup_path if hasattr(extra_args, 'setup_path') else None)
-    resolve_missing_arg(data_args, 'dataset_dir', training_args.output_dir, extra_args.setup_path if hasattr(extra_args, 'setup_path') else None)
 
     # Send telemetry for usage tracking (optional).
     send_example_telemetry("run_translation", model_args, data_args)
 
-    # --- Logging configuration ---
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-    if training_args.should_log:
-        transformers.utils.logging.set_verbosity_info()
-    log_level = training_args.get_process_log_level()
-    logger.setLevel(log_level)
-    datasets.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.set_verbosity(log_level)
-    transformers.utils.logging.enable_default_handler()
-    transformers.utils.logging.enable_explicit_format()
+    set_up_logging(log_level=training_args.get_process_log_level(),
+                   should_log=training_args.should_log)
 
     # --- Load the test dataset ---
     if data_args.dataset_dir is not None:
