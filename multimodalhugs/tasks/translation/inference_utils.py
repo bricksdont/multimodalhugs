@@ -388,9 +388,14 @@ def batched_prediction(
         gen_args.update({k: v for k, v in gen_kwargs.items() if v is not None})
 
     # Ensure we get a rich return payload for perplexity
-    gen_args.setdefault("return_dict_in_generate", True)
-    gen_args.setdefault("output_scores", True)
-    gen_args.setdefault("pad_token_id", tokenizer.pad_token_id)
+
+    if return_perplexity:
+        gen_args["return_dict_in_generate"] = True
+        gen_args["output_scores"] = True
+    else:
+        gen_args.setdefault("return_dict_in_generate", True)
+        gen_args.setdefault("output_scores", True)
+        gen_args.setdefault("pad_token_id", tokenizer.pad_token_id)
 
     generation_inputs = inputs.copy()
 

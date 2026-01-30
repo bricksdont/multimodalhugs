@@ -26,6 +26,7 @@ import multimodalhugs.models
 import logging
 import json
 import torch
+import torch as nn
 
 from pathlib import Path
 from typing import Union, Dict, List, Any, Optional
@@ -100,7 +101,7 @@ class Translator:
                  config: Optional[MultiModalEmbedderConfig] = None,
                  config_name: Optional[str] = None,
                  model_name_or_path: Optional[str] = None,
-                 model: Optional[MultiModalEmbedderModel] = None,
+                 model: Optional[Union[MultiModalEmbedderModel, nn.Module]] = None,
                  processor: Optional[MultimodalSequence2SequenceProcessor] = None,
                  processor_name_or_path: Optional[str] = None,
                  processor_kwargs: dict = None,
