@@ -55,16 +55,21 @@ def test_translator_init_fails_without_processor_path():
 @pytest.fixture
 def create_temporary_tsv_file(request) -> str:
 
-    identical_decoder_prompts = request.param["identical_decoder_prompts"]
+    include_decoder_prompts = request.param["include_decoder_prompts"]
+    identical_decoder_prompts = request.param.get("identical_decoder_prompts", False)
 
-    data = "signal\tdecoder_prompt\toutput\n"
-
-    if identical_decoder_prompts:
-        data += "hello my fellow engineers\tTranslate from English to German: \t\n"
-        data += "this is a test\tTranslate from English to German: \t\n"
+    if include_decoder_prompts:
+        data = "signal\tdecoder_prompt\toutput\n"
+        if identical_decoder_prompts:
+            data += "hello my fellow engineers\tTranslate from English to German: \t\n"
+            data += "this is a test\tTranslate from English to German: \t\n"
+        else:
+            data += "hello my fellow engineers\tTranslate from English to German: \t\n"
+            data += "Das ist ein Test\tTranslate from German to English: \t\n"
     else:
-        data += "hello my fellow engineers\tTranslate from English to German: \t\n"
-        data += "Das ist ein Test\tTranslate from German to English: \t\n"
+        data = "signal\toutput\n"
+        data += "Translate from English to German: hello my fellow engineers\t\n"
+        data += "Translate from German to English: Das ist ein Test\t\n"
 
     fd, path = tempfile.mkstemp(suffix=".tsv")
     os.write(fd, data.encode())
@@ -76,12 +81,8 @@ def create_temporary_tsv_file(request) -> str:
     "create_temporary_tsv_file",
     [
         {
-            "id": "identical_decoder_prompts",
-            "identical_decoder_prompts": True,
-        },
-{
-            "id": "different_decoder_prompts",
-            "identical_decoder_prompts": False,
+            "id": "no_decoder_prompts",
+            "include_decoder_prompts": False,
         },
     ],
     indirect=True,
@@ -92,7 +93,16 @@ def test_translator_text_to_text_generation(create_temporary_tsv_file):
 
     base_model = AutoModelForSeq2SeqLM.from_pretrained("google-t5/t5-small")
 
-    model_input_ignore_keys = ["encoder_prompt", "encoder_prompt_length_padding_mask"]
+    # Remove keys that `MultiModalEmbedderModel` expects, but AutoModelForSeq2SeqLM does not.
+    # "decoder_input_ids" and "decoder_attention_mask" are also not strictly supported by
+    # AutoModelForSeq2SeqLM in the sense of variable-length / free-form decoder prompts,
+    # just for forced decoding.
+    # But model.generate will not reject inputs if these keys are present and if they are empty
+    # they will be ignored.
+
+    model_input_ignore_keys = ["encoder_prompt",
+                               "encoder_prompt_length_padding_mask"]
+
     model: nn.Module = GenerateKwargsStrippingWrapper(base_model,
                                                       model_input_ignore_keys)
 
@@ -107,4 +117,6 @@ def test_translator_text_to_text_generation(create_temporary_tsv_file):
                             processor=processor,
                             modality="text2text")
 
-    translator.translate_tsv(tsv_path)
+    result = translator.translate_tsv(tsv_path)
+
+    print(result)

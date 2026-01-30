@@ -180,8 +180,7 @@ def _to_numpy(x: Optional[Union[np.ndarray, torch.Tensor]]) -> Optional[np.ndarr
 def logits_to_text(
     tokenizer,
     generated_tokens: Union[torch.Tensor, np.ndarray, Tuple],
-    labels: Optional[Union[torch.Tensor, np.ndarray]] = None,
-) -> Tuple[List[str], Optional[List[str]]]:
+) -> List[str]:
     """
     Decode token IDs → strings, masking ignore index (-100) to tokenizer.pad_token_id.
 
@@ -191,12 +190,10 @@ def logits_to_text(
     generated_tokens : torch.Tensor | np.ndarray | tuple
         Token IDs returned by `model.generate(...)`. Some models return a tuple where
         the first element is the `sequences` tensor.
-    labels : torch.Tensor | np.ndarray | None
-        Optional ground-truth token IDs (for evaluation); will be decoded if provided.
 
     Returns
     -------
-    (decoded_generated, decoded_labels | None)
+    decoded_generated
     """
     # Some HF models return tuples; extract the sequences
     if isinstance(generated_tokens, tuple):
@@ -216,15 +213,7 @@ def logits_to_text(
                                                       skip_special_tokens=True,
                                                       clean_up_tokenization_spaces=True)
 
-    if labels is not None:
-        labels = _to_numpy(labels)
-        labels = np.where(labels != -100, labels, pad_id)
-        decoded_labels = tokenizer.batch_decode(labels,
-                                                skip_special_tokens=True,
-                                                clean_up_tokenization_spaces=True)
-        return decoded_generated_tokens, decoded_labels
-
-    return decoded_generated_tokens, None
+    return decoded_generated_tokens
 
 
 def all_values_equal(tensor: torch.Tensor) -> bool:
@@ -334,11 +323,11 @@ def batched_prediction(
     model: nn.Module,
     tokenizer,
     inputs: Dict[str, Union[torch.Tensor, Any]],
-    generation_config: Optional[Union[GenerationConfig, Dict[str, Any]]] = None,
+    generation_config: Optional[GenerationConfig] = None,
     prepare_inputs_fn: Optional[callable] = None,
     gen_kwargs: Optional[Dict[str, Any]] = None,
     return_perplexity: bool = True,
-) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[List[float]]]:
+) -> Tuple[torch.Tensor, Optional[List[float]]]:
     """
     Perform a single batched prediction step:
       - Optionally preprocess inputs (e.g., move to device)
@@ -352,9 +341,9 @@ def batched_prediction(
     tokenizer : PreTrainedTokenizerBase
         The tokenizer used by the model. Needed for PAD/EOS and decoding.
     inputs : dict
-        Batch dict compatible with the model (and optionally containing "labels").
-    generation_config : GenerationConfig | dict | None
-        Default generation parameters. A dict is fine; we `to_dict()` if needed.
+        Batch dict compatible with the model.
+    generation_config : GenerationConfig | None
+        Default generation parameters.
     prepare_inputs_fn : callable | None
         A function(inputs) -> inputs, e.g., to move all tensors to model.device.
     gen_kwargs : dict | None
@@ -366,50 +355,25 @@ def batched_prediction(
     -------
     (generated_tokens, labels | None, perplexities | None)
         generated_tokens : torch.LongTensor with shape [B, L_generated]
-        labels           : torch.LongTensor or None
         perplexities     : List[float] or None
     """
     # Optional preprocessing (e.g., device move, precision cast)
     if prepare_inputs_fn is not None:
         inputs = prepare_inputs_fn(inputs)
 
-    has_labels = "labels" in inputs
-    labels = inputs["labels"] if has_labels else None
+    if gen_kwargs is None:
+        gen_kwargs = {}
 
-    # Merge generation config / kwargs
-    gen_args: Dict[str, Any] = {}
-    if isinstance(generation_config, GenerationConfig):
-        gen_args = generation_config.to_dict()
-    elif isinstance(generation_config, dict):
-        gen_args = generation_config.copy()
+    gen_kwargs.setdefault("pad_token_id", tokenizer.pad_token_id)
 
-    if gen_kwargs is not None:
-        # Override defaults with explicit kwargs
-        gen_args.update({k: v for k, v in gen_kwargs.items() if v is not None})
+    gen_kwargs["return_dict_in_generate"] = True
 
     # Ensure we get a rich return payload for perplexity
 
     if return_perplexity:
-        gen_args["return_dict_in_generate"] = True
-        gen_args["output_scores"] = True
-    else:
-        gen_args.setdefault("return_dict_in_generate", True)
-        gen_args.setdefault("output_scores", True)
-        gen_args.setdefault("pad_token_id", tokenizer.pad_token_id)
+        gen_kwargs["output_scores"] = True
 
     generation_inputs = inputs.copy()
-
-    # If both `labels` and `decoder_input_ids` are present with same shape, HF may
-    # think we want forced decoding. Remove decoder fields to allow free generation.
-    if (
-        "labels" in generation_inputs
-        and "decoder_input_ids" in generation_inputs
-        and generation_inputs["labels"].shape == generation_inputs["decoder_input_ids"].shape
-    ):
-        generation_inputs = {
-            k: v for k, v in generation_inputs.items()
-            if k not in ("decoder_input_ids", "decoder_attention_mask")
-        }
 
     # ---- Generation paths -----------------------------------------------------
     # We distinguish 3 cases for efficiency/stability:
@@ -427,16 +391,15 @@ def batched_prediction(
     if use_batch_path:
         # Case 1: batch generation
         with torch.no_grad():
-            outputs = model.generate(**generation_inputs, **gen_args)
+            outputs = model.generate(**generation_inputs, **gen_kwargs, generation_config=generation_config)
 
         generated_tokens = outputs.sequences.detach().cpu()
-        labels_cpu = labels.detach().cpu() if has_labels else None
 
         perplexities = None
         if return_perplexity:
             perplexities = _compute_perplexities_from_generate(model, tokenizer, outputs, generation_inputs)
 
-        return generated_tokens, labels_cpu, perplexities
+        return generated_tokens, perplexities
 
     # Case 2: generate from scratch (no decoder prompts)
     if (
@@ -447,16 +410,15 @@ def batched_prediction(
         generation_inputs.pop("decoder_input_ids", None)
         generation_inputs.pop("decoder_attention_mask", None)
         with torch.no_grad():
-            outputs = model.generate(**generation_inputs, **gen_args)
+            outputs = model.generate(**generation_inputs, **gen_kwargs, generation_config=generation_config)
 
         generated_tokens = outputs.sequences.detach().cpu()
-        labels_cpu = labels.detach().cpu() if has_labels else None
 
         perplexities = None
         if return_perplexity:
             perplexities = _compute_perplexities_from_generate(model, tokenizer, outputs, generation_inputs)
 
-        return generated_tokens, labels_cpu, perplexities
+        return generated_tokens, perplexities
 
     # Case 3: variable-length prompts → generate per-sample then pad+concat
     B = next(iter(generation_inputs.values())).shape[0]  # batch size
@@ -475,7 +437,7 @@ def batched_prediction(
 
     for sample in samples:
         with torch.no_grad():
-            out_i = model.generate(**sample, **gen_args)  # returns dict-like output
+            out_i = model.generate(**sample, **gen_kwargs, generation_config=generation_config)  # returns dict-like output
         seqs.append(out_i.sequences)
         max_len = max(max_len, out_i.sequences.shape[1])
 
@@ -490,9 +452,8 @@ def batched_prediction(
             seqs[i] = F.pad(seqs[i], (0, pad_len), value=pad_id)
 
     generated_tokens = torch.cat(seqs, dim=0).detach().cpu()
-    labels_cpu = labels.detach().cpu() if has_labels else None
 
-    return generated_tokens, labels_cpu, (perplexities if return_perplexity else None)
+    return generated_tokens, (perplexities if return_perplexity else None)
 
 
 # -----------------------------
@@ -508,7 +469,7 @@ def batched_inference(
     label_pad_token_id: int = -100,
     pad_to_multiple_of: Optional[int] = None,
     gen_kwargs: Optional[Dict[str, Any]] = None,
-    generation_config: Optional[Union[GenerationConfig, Dict[str, Any]]] = None,
+    generation_config: Optional[GenerationConfig] = None,
 ) -> Dict[str, List[Any]]:
     """
     End-to-end convenience function:
@@ -537,8 +498,8 @@ def batched_inference(
         Pads to a multiple of this number, if set.
     gen_kwargs : dict | None
         Additional keyword args for `model.generate` that override `generation_config`.
-    generation_config : GenerationConfig | dict | None
-        Default generation parameters. A dict is fine; we `to_dict()` if needed.
+    generation_config : GenerationConfig | None
+        Default generation parameters.
 
     Returns
     -------
@@ -559,15 +520,18 @@ def batched_inference(
     )
 
     predicted_samples: List[str] = []
-    labels_list: List[str] = []
     perplexities_all: List[float] = []
 
     for batch in tqdm(dataloader):
+        print(batch)
+        for token_id in batch["input_ids"][0]:
+            print(processor.tokenizer.decode([token_id]))
+
         # Ensure tensors are on the model's device (non-tensors are passed through)
         batch = {k: v.to(model.device) if hasattr(v, "to") else v for k, v in batch.items()}
 
         with torch.no_grad():
-            generated_tokens, labels, perplexities = batched_prediction(
+            generated_tokens, perplexities = batched_prediction(
                 model=model,
                 tokenizer=processor.tokenizer,
                 inputs=batch,
@@ -577,23 +541,18 @@ def batched_inference(
             )
 
         # Decode to text. Accepts torch tensors directly.
-        decoded_preds, decoded_labels = logits_to_text(
+        decoded_preds = logits_to_text(
             processor.tokenizer,
             generated_tokens,
-            labels,
         )
 
         predicted_samples.extend(decoded_preds)
-
-        if decoded_labels is not None:
-            labels_list.extend(decoded_labels)
 
         if perplexities is not None:
             perplexities_all.extend(perplexities)
 
     return {
         "preds": predicted_samples,
-        "labels": labels_list if len(labels_list) == len(predicted_samples) else [],
         "perplexities": perplexities_all if len(perplexities_all) == len(predicted_samples) else [],
     }
 

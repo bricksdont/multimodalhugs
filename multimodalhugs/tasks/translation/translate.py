@@ -26,7 +26,7 @@ import multimodalhugs.models
 import logging
 import json
 import torch
-import torch as nn
+import torch.nn as nn
 
 from pathlib import Path
 from typing import Union, Dict, List, Any, Optional
